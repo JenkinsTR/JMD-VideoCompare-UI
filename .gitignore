@@ -7425,3 +7425,5 @@ JMD-VideoCompare-UI/venv/Scripts/symilar.exe
 JMD-VideoCompare-UI/venv/Scripts/undill
 JMD-VideoCompare-UI/venv/Scripts/yapf-diff.exe
 JMD-VideoCompare-UI/venv/Scripts/yapf.exe
+JMD-VideoCompare-UI/app.log
+JMD-VideoCompare-UI/__pycache__/ui_form.cpython-39.pyc
