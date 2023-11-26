@@ -197,7 +197,7 @@
      <rect>
       <x>10</x>
       <y>310</y>
-      <width>180</width>
+      <width>230</width>
       <height>24</height>
      </rect>
     </property>
@@ -213,7 +213,7 @@
      <rect>
       <x>10</x>
       <y>280</y>
-      <width>180</width>
+      <width>230</width>
       <height>24</height>
      </rect>
     </property>
@@ -563,46 +563,12 @@
      <string>Start Time (HH:MM:SS)</string>
     </property>
    </widget>
-   <widget class="QLabel" name="labelFPS">
-    <property name="geometry">
-     <rect>
-      <x>210</x>
-      <y>280</y>
-      <width>180</width>
-      <height>24</height>
-     </rect>
-    </property>
-    <property name="font">
-     <font>
-      <pointsize>12</pointsize>
-     </font>
-    </property>
-    <property name="text">
-     <string>Framerate (FPS)</string>
-    </property>
-   </widget>
-   <widget class="QLineEdit" name="lineEditFPS">
-    <property name="geometry">
-     <rect>
-      <x>210</x>
-      <y>310</y>
-      <width>180</width>
-      <height>24</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>25</string>
-    </property>
-    <property name="alignment">
-     <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
-    </property>
-   </widget>
    <widget class="QLabel" name="labelVideoCodec">
     <property name="geometry">
      <rect>
-      <x>410</x>
+      <x>260</x>
       <y>280</y>
-      <width>180</width>
+      <width>230</width>
       <height>24</height>
      </rect>
     </property>
@@ -618,9 +584,9 @@
    <widget class="QComboBox" name="comboBoxVideoCodec">
     <property name="geometry">
      <rect>
-      <x>410</x>
+      <x>260</x>
       <y>310</y>
-      <width>180</width>
+      <width>230</width>
       <height>24</height>
      </rect>
     </property>
@@ -628,9 +594,9 @@
    <widget class="QLabel" name="labelAudioCodec">
     <property name="geometry">
      <rect>
-      <x>610</x>
+      <x>510</x>
       <y>280</y>
-      <width>180</width>
+      <width>230</width>
       <height>24</height>
      </rect>
     </property>
@@ -646,9 +612,9 @@
    <widget class="QComboBox" name="comboBoxAudioCodec">
     <property name="geometry">
      <rect>
-      <x>610</x>
+      <x>510</x>
       <y>310</y>
-      <width>180</width>
+      <width>230</width>
       <height>24</height>
      </rect>
     </property>
@@ -656,9 +622,9 @@
    <widget class="QLabel" name="labelBitrate">
     <property name="geometry">
      <rect>
-      <x>810</x>
+      <x>760</x>
       <y>280</y>
-      <width>180</width>
+      <width>230</width>
       <height>24</height>
      </rect>
     </property>
@@ -674,9 +640,9 @@
    <widget class="QLineEdit" name="lineEditBirate">
     <property name="geometry">
      <rect>
-      <x>810</x>
+      <x>760</x>
       <y>310</y>
-      <width>180</width>
+      <width>230</width>
       <height>24</height>
      </rect>
     </property>

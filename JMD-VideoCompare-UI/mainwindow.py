@@ -2,10 +2,10 @@
 import sys
 import subprocess
 import re
-from threading import Thread
-from PySide6.QtWidgets import QApplication, QMainWindow, QFileDialog, QMessageBox
-from PySide6.QtGui import QTextCursor, QDesktopServices
-from PySide6.QtCore import QUrl
+import os
+from PySide6.QtWidgets import QApplication, QMainWindow, QFileDialog, QMessageBox, QSplashScreen
+from PySide6.QtGui import QTextCursor, QDesktopServices, QFontDatabase, QPixmap
+from PySide6.QtCore import Qt, QThread, Signal, QUrl
 import logging
 
 # Setup logging
@@ -13,6 +13,47 @@ logging.basicConfig(filename='app.log', filemode='w', format='%(name)s - %(level
 
 # Import the UI layout
 from ui_form import Ui_MainWindow
+
+class FontScanner(QThread):
+    update_signal = Signal(str)
+
+    def __init__(self, font_dir):
+        super().__init__()
+        self.font_dir = font_dir
+        self.font_cache = {}  # Initialize the font cache here
+
+    def run(self):
+        font_files = os.listdir(self.font_dir)
+        total_fonts = len(font_files)
+        for idx, file_name in enumerate(font_files):
+            font_path = os.path.join(self.font_dir, file_name)
+            if os.path.isfile(font_path):
+                font_id = QFontDatabase.addApplicationFont(font_path)  # Add font and get font ID
+                for family in QFontDatabase.applicationFontFamilies(font_id):
+                    self.font_cache[family] = font_path  # Populate the font_cache
+                    self.update_signal.emit(f"Scanning fonts: {idx+1}/{total_fonts} {file_name}")
+        self.update_signal.emit("Font scanning complete.")
+
+    def get_font_cache(self):
+        return self.font_cache
+
+class FFmpegThread(QThread):
+    update_signal = Signal(str)
+
+    def __init__(self, command):
+        QThread.__init__(self)
+        self.command = command
+
+    def run(self):
+        try:
+            process = subprocess.Popen(self.command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            for line in process.stdout:
+                standardized_line = line.replace('\r\n', '\n').replace('\r', '\n').strip()
+                self.update_signal.emit(standardized_line)
+            process.wait()
+            self.update_signal.emit("Processing completed successfully.")
+        except Exception as e:
+            self.update_signal.emit(f"FFmpeg subprocess error: {e}")
 
 class MainWindow(QMainWindow):
     def __init__(self, parent=None):
@@ -43,13 +84,22 @@ class MainWindow(QMainWindow):
         self.ui.checkBoxVideo2AddTextTop.clicked.connect(self.update_text_position_video2)
         self.ui.checkBoxVideo2AddTextMiddle.clicked.connect(self.update_text_position_video2)
 
+        self.font_cache = {}  # Initialize an empty dictionary for font_cache
+
+    def start_font_scanning(self, splash):
+        self.splash = splash
+        self.font_scanner = FontScanner(os.path.join(os.environ['WINDIR'], 'Fonts'))
+        self.font_scanner.update_signal.connect(lambda msg: splash.showMessage(msg, Qt.AlignBottom | Qt.AlignCenter, Qt.white))
+        self.font_scanner.finished.connect(self.on_font_scanning_finished)
+        self.font_scanner.start()
+
+    def on_font_scanning_finished(self):
+        self.font_cache = self.font_scanner.get_font_cache()
+        self.splash.finish(self)
+        self.show()  # Show the main window after the font scanning is complete and splash screen is closed
+
     def open_url(self):
         QDesktopServices.openUrl(QUrl("https://jmd.vc"))
-
-    def append_to_output(self, text):
-        self.ui.plainTextEditOutput.appendPlainText(text)
-        self.ui.plainTextEditOutput.moveCursor(QTextCursor.End)  # Move cursor to end
-        self.ui.plainTextEditOutput.ensureCursorVisible()  # Ensure new text is visible
 
     def populate_codec_comboboxes(self):
         # Common video codecs
@@ -108,18 +158,63 @@ class MainWindow(QMainWindow):
 
     # Method to get resolution from inputs
     def get_resolution(self, video_path):
-        cmd = ["bin/ffmpeg.exe", "-i", video_path]  # Update path to ffmpeg if needed
-        result = subprocess.run(cmd, capture_output=True, text=True, shell=True)
-        match = re.search(r'(\d{2,})x(\d{2,})', result.stderr)
+        cmd = ["bin/ffprobe.exe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=s=x:p=0", video_path]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            logging.error(f"ffprobe error: {result.stderr}")
+            return (0, 0)
+
+        match = re.match(r'(\d+)x(\d+)', result.stdout)
         return match.groups() if match else (0, 0)
+
+    def scan_and_cache_fonts(self):
+        self.append_to_output("Scanning system fonts...")
+        font_dir = os.path.join(os.environ['WINDIR'], 'Fonts')
+        for file in os.listdir(font_dir):
+            font_path = os.path.join(font_dir, file)
+            if os.path.isfile(font_path):
+                # Add font and check families without creating QFontDatabase instance
+                font_id = QFontDatabase.addApplicationFont(font_path)
+                for family in QFontDatabase.applicationFontFamilies(font_id):
+                    self.font_cache[family] = font_path
+                    self.append_to_output(f"Cached font: {family}")
+        self.append_to_output("Font scanning complete.")
+
+    def get_font_path(self, font_family):
+        return self.font_cache.get(font_family)
+
+    def convert_font_path(self, font_path):
+        return font_path.replace('\\', '/').replace(':', '\\:')
+
+    def get_frame_rate(self, video_path, override_framerate=None):
+        if override_framerate:
+            try:
+                float_override = float(override_framerate)
+                return str(float_override)
+            except ValueError:
+                pass  # If override is not a valid float, proceed to extract frame rate
+
+        cmd = ["bin/ffprobe.exe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=r_frame_rate", "-of", "default=noprint_wrappers=1:nokey=1", video_path]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            logging.error(f"ffprobe error: {result.stderr}")
+            return "25"  # Default frame rate in case of error
+
+        # Calculate and return the frame rate
+        try:
+            num, den = result.stdout.strip().split('/')
+            return str(int(num) / int(den))
+        except Exception as e:
+            logging.error(f"Error calculating frame rate: {e}")
+            return "25"  # Default frame rate in case of error
 
     def process_videos(self):
         # Gather inputs from UI elements
         video1_path = self.ui.lineEditVideo1.text()
         video2_path = self.ui.lineEditVideo2.text()
-        start_time = self.ui.lineEditStartTimeVideo1.text()
+        start_time_video1 = self.ui.lineEditStartTimeVideo1.text()
+        start_time_video2 = self.ui.lineEditStartTimeVideo2.text()
         duration = self.ui.lineEditDuration.text()
-        framerate = self.ui.lineEditFPS.text()
         video_codec = self.ui.comboBoxVideoCodec.currentText()
         audio_codec = self.ui.comboBoxAudioCodec.currentText()
         bitrate = self.ui.lineEditBirate.text()
@@ -139,21 +234,35 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Error", "Failed to obtain video resolutions. Check input file paths.")
             return
 
-        # Calculate half width for cropping and ensure it's even
-        half_width1 = (int(res1[0]) // 2) - ((int(res1[0]) // 2) % 2)
-        half_width2 = (int(res2[0]) // 2) - ((int(res2[0]) // 2) % 2)
+        # Calculate half width for cropping. Ensure it is an even number for YUV420 chroma subsampling
+        half_width1 = int(res1[0]) // 2
+        half_width2 = int(res2[0]) // 2
+
+        # Adjust half_width to be even
+        if half_width1 % 2 != 0:
+            half_width1 -= 1
+        if half_width2 % 2 != 0:
+            half_width2 -= 1
 
         # Set a common height to the larger of both videos
-        common_height = max(int(res1[1]), int(res2[1]))
+        # common_height = max(int(res1[1]), int(res2[1]))
 
         # Calculate the starting x position for cropping the right half of video 2
-        crop_start_x_video2 = int(res2[0]) - half_width2
+        # crop_start_x_video2 = int(res2[0]) - half_width2
 
-        # Get selected fonts and text
+        # Retrieve the font path using the font family name
         font_video1 = self.ui.fontComboBoxVideo1.currentFont().family()
+        font_path_video1_raw = self.font_cache.get(font_video1, '')  # Get raw font path
+        font_path_video1 = self.convert_font_path(font_path_video1_raw)  # Convert to FFmpeg format
+
         font_video2 = self.ui.fontComboBoxVideo2.currentFont().family()
+        font_path_video2_raw = self.font_cache.get(font_video2, '')  # Get raw font path
+        font_path_video2 = self.convert_font_path(font_path_video2_raw)  # Convert to FFmpeg format
+
         text_video1 = self.ui.lineEditVideo1Text.text()
         text_video2 = self.ui.lineEditVideo2Text.text()
+        color_video1 = self.ui.comboBoxVideo1AddTextColor.currentText()
+        color_video2 = self.ui.comboBoxVideo2AddTextColor.currentText()
 
         # Determine text position for video 1
         text_position_video1 = "(h-text_h)/2"  # Middle by default
@@ -169,70 +278,77 @@ class MainWindow(QMainWindow):
         elif self.ui.checkBoxVideo2AddTextBottom.isChecked():
             text_position_video2 = "h-text_h-10"  # Near the bottom
 
-        # Construct FFmpeg filter_complex string
-        filter_complex = f"[0:v]crop={half_width1}:ih:0:0,scale={half_width1}:{common_height}[left];"
-        filter_complex += f"[1:v]crop={half_width2}:ih:{crop_start_x_video2}:0,scale={half_width2}:{common_height}[right];"
+        # Start constructing the filter_complex string
+        crop_scale_left = f"crop=iw/2:ih:0:0,scale=-2:{int(res2[1])}"
+        crop_right = f"crop={int(res2[0])/2}:{int(res2[1])}:{int(res2[0])/2}:0"
+
+        filter_complex = f"[0:v]{crop_scale_left}[left];[1:v]{crop_right}[right];"
 
         # Apply text overlays if checked
         if self.ui.checkBoxVideo1AddText.isChecked():
-            filter_complex += f"[left]drawtext=text='{text_video1}':fontfile='{font_video1}':x=(w-text_w)/2:y={text_position_video1}[left];"
+            filter_complex += f"[left]drawtext=text='{text_video1}':fontfile='{font_path_video1}':fontcolor={color_video1}:x=(w-text_w)/2:y={text_position_video1}[left];"
         if self.ui.checkBoxVideo2AddText.isChecked():
-            filter_complex += f"[right]drawtext=text='{text_video2}':fontfile='{font_video2}':x=(w-text_w)/2:y={text_position_video2}[right];"
+            filter_complex += f"[right]drawtext=text='{text_video2}':fontfile='{font_path_video2}':fontcolor={color_video2}:x=(w-text_w)/2:y={text_position_video2}[right];"
 
         # Combine left and right videos with divider
-        filter_complex += f"[left][right]xstack=inputs=2:layout=0_0|w0_{divider_width}:fill={divider_color}[v]"
+        if self.ui.checkBoxOutputVideoDivider.isChecked():
+            divider_layout = f"|w0+{divider_width}_0"
+        else:
+            divider_layout = "|w0_0"
+
+        filter_complex += f"[left][right]xstack=inputs=2:layout=0_0{divider_layout}:fill={divider_color}[v]"
 
         # Update output file extension
         output_file_extension = self.ui.comboBoxOutputVideoType.currentText()
         if not output_file.endswith(f".{output_file_extension}"):
             output_file = f"{output_file}.{output_file_extension}"
 
+        # Construct the FFmpeg command
+        cmd = [
+            "bin/ffmpeg.exe",
+            "-ss", str(start_time_video1),
+            "-i", str(video1_path),
+            "-ss", str(start_time_video2),
+            "-i", str(video2_path),
+            "-filter_complex", filter_complex,
+            "-map", "[v]",
+            "-t", str(duration),
+            "-c:v", str(video_codec),
+            "-b:v", str(bitrate) + "k",
+            str(output_file)
+        ]
+
+        # Determine audio mapping based on user selection
+        if use_audio_from_video1:
+            cmd.extend(["-map", "0:a", "-c:a", audio_codec])
+        elif use_audio_from_video2:
+            cmd.extend(["-map", "1:a", "-c:a", audio_codec])
+
+        # Print the command to the output area
+        self.append_to_output("FFmpeg command:\n" + " ".join(cmd))
+
         try:
-            # Construct the FFmpeg command
-            cmd = [
-                "bin/ffmpeg.exe",  # Replace with the correct path to ffmpeg
-                "-ss", start_time,
-                "-t", duration,
-                "-i", video1_path,
-                "-i", video2_path,
-                "-filter_complex", filter_complex,
-                "-map", "[v]",
-                "-r", framerate,
-                "-c:v", video_codec,
-                "-b:v", f"{bitrate}k",
-                output_file
-            ]
-
-            # Determine audio mapping based on user selection
-            if use_audio_from_video1:
-                cmd.extend(["-map", "0:a", "-c:a", audio_codec])
-            elif use_audio_from_video2:
-                cmd.extend(["-map", "1:a", "-c:a", audio_codec])
-
-            # Run the FFmpeg command in a separate thread
-            thread = Thread(target=self.run_ffmpeg_command, args=(cmd,))
-            thread.start()
+            self.ffmpeg_thread = FFmpegThread(cmd)
+            self.ffmpeg_thread.update_signal.connect(self.append_to_output)
+            self.ffmpeg_thread.start()
         except Exception as e:
             logging.error(f"Error in process_videos: {e}")
             QMessageBox.critical(self, "Error", f"An unexpected error occurred: {e}")
 
-    def run_ffmpeg_command(self, cmd):
-        try:
-            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-            for line in process.stdout:
-                # Standardize line endings
-                standardized_line = line.replace('\r\n', '\n').replace('\r', '\n')
-                self.append_to_output(standardized_line.strip())  # Remove leading/trailing whitespace
-                QApplication.processEvents()  # Update GUI
-            process.wait()
-            self.statusBar().showMessage("Processing completed successfully.")
-        except Exception as e:
-            # Log and inform of the error
-            logging.error(f"FFmpeg subprocess error: {e}")
-            self.append_to_output(f"Error: {e}")
+    def append_to_output(self, text):
+        QApplication.processEvents()
+        self.ui.plainTextEditOutput.appendPlainText(text)
+        self.ui.plainTextEditOutput.moveCursor(QTextCursor.End)
+        self.ui.plainTextEditOutput.ensureCursorVisible()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    widget = MainWindow()
-    widget.show()
+    splash_pix = QPixmap("images/splash.png")
+    splash = QSplashScreen(splash_pix)
+    splash.show()
+    app.processEvents()
+
+    main_window = MainWindow()
+    main_window.start_font_scanning(splash)
+
     sys.exit(app.exec())
