@@ -1,6 +1,1 @@
-{
-    "files": [
-        "mainwindow.py",
-        "form.ui"
-    ]
-}
+{"files":["mainwindow.py"]}
